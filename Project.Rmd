@@ -1,0 +1,132 @@
+---
+title: "Practical Machine Learning:  Course Project"
+author: "Tracy Wilson"
+date: "June 20, 2015"
+output: html_document
+---
+```{r}
+setwd("D:/Users/Tracy/Documents/R/Machine Learning/Project/Machine-Learning-Project")
+library(caret, quietly=TRUE)
+library(knitr, quietly=TRUE)
+library(ggplot2, quietly=TRUE)
+library(dplyr, quietly=TRUE)
+library(randomForest, quietly=TRUE)
+```
+##Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, myr goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.  
+
+##Prepare the Data
+
+The data sets have been downloaded and saved to the working directory.  From there they will be read into dataframes. There are 2 data sets, the training data set and the testing data set. Data will be cleanses and all "NA" and "DIV/0" will be removed. 
+
+
+```{r}
+trainData <- read.csv(file = 'pml-training.csv',
+                      na.strings = c('NA','#DIV/0!',''))
+testData <- read.csv(file = 'pml-testing.csv',
+                     na.strings = c('NA','#DIV/0!',''))
+```
+
+We take a cursory look at the data, paying particular attention to classe which is the variable we need to predict
+
+```{r}
+str(trainData, list.len=15)
+str(testData, list.len=15)
+
+```
+
+Initial data analysis shows that the first 7 fields are non-numeric and are not needed for the prediction model.  We will loop through the raw data and cast all of the columns, except for the last one which is the categorical class, as numeric. 
+
+```{r}
+for(i in c(8:ncol(trainData)-1)) {
+  trainData[,i] = as.numeric(as.character(trainData[,i]))
+  testData[,i] = as.numeric(as.character(testData[,i]))
+}
+```
+
+Further analysis shows that many of the columns do not have a great deal of data and will not be useful in building the model.  We will create an index which will be used to filter the data set to use columns with full compliments of data.
+
+```{r}
+pertinentDataIndex <- colnames(trainData)
+pertinentDataIndex <- colnames(trainData[colSums(is.na(trainData)) == 0])
+pertinentDataIndex <- pertinentDataIndex[-c(1:7)]
+```
+
+##Split Data Into Training and Evaluation Groups
+
+To find the optimal model we will split the testing data 70/30 into training and evaluation samples respectively.  When the samples are created we apply the pertinent data index to them.  This ensures that we only have good data with which to create the model.
+
+```{r}
+set.seed(1255)
+index_train <- createDataPartition(y=trainData$classe, p=0.70, list=FALSE)
+trainDataSet <- trainData[index_train,pertinentDataIndex]
+evalDataSet <- trainData[-index_train,pertinentDataIndex]
+dim(trainDataSet)
+dim(evalDataSet)
+```
+
+##Premodel Fitting
+Before we fit the model 
+
+```{r}
+ggplot(aes(x=classe), data=trainDataSet) +
+    geom_histogram(fill='gray') +
+    ggtitle('Histogram of Classe Frequency in Training Set') +
+    xlab('Classe of Excercise') +
+    ylab('Frequency in Training Data')
+
+```    
+
+From the histogram we see that the classifications are within an order of magnitude of each other.
+
+##Train Candidate Model and Evaluate
+
+```{r}
+modelRF <- train(classe ~ ., data = trainDataSet, method = 'rf', 
+                  trControl = trainControl(method = "cv", number = 4, allowParallel = TRUE, verboseIter = TRUE))
+
+predictRF <- predict(modelRF,evalDataSet)
+confusionRF <- confusionMatrix(predictRF,evalDataSet$classe)
+```
+
+##Predictions Against Cross Validation Data
+
+The Random Forest model appears to be the most accurate. 
+
+```{r}
+ggplot(data=data.frame(confusionRF$table)) + 
+    geom_tile(aes(x=Reference, y=Prediction, fill=Freq)) +
+    ggtitle('Prediction Accuracy for Classes in Cross-Validation (Random Forest Model)') +
+    xlab('Actual Classe') +
+    ylab('Predicted Classe from Model')
+```
+
+The graph above compares the predictions for each class against the actual value in the cross validation set, and colors the tile intersection for each combination of outcome class by the frequency of prediction. The intersection of Predicted Classe and Actual Class is very high for all 5 classes in the Random Forest model  This indicates that the model is very accurate.
+
+```{r}
+confusionRF
+```
+
+The accuracy of the model is  **`r confusionRF$overall['Accuracy']`** . The out of sample error is  **`r 1 - confusionRF$overall['Accuracy']`** . The out of sample error is calculated as **`r  1 - confusionRF$overall['Accuracy']`**  for predictions made against the cross-validation set. With a sample size of 20, an error rate that is less than 1% is a good indication that the little or none of the test samples will be misclassified.
+
+##Submissions to Coursera
+
+Write submission files to local file directory.
+
+```{r}
+finalCol <- length(colnames(testData[]))
+colnames(testData)[finalCol] <- 'classe'
+answers <- predict(modelRF,testData[,pertinentDataIndex])
+
+
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(answers)
+```
